@@ -259,6 +259,11 @@ function install() {
     # Install GPU Drivers
     COMMON_VULKAN_PACKAGES="vulkan-icd-loader lib32-vulkan-icd-loader vulkan-tools"
 
+    # Drivers for VM guest installations
+    if [[ "$INTEL_GPU" == "false" && "$AMD_GPU" == "false" && "$NVIDIA_GPU" == "false" ]]; then
+        arch-chroot /mnt pacman -S --noconfirm --needed $COMMON_VULKAN_PACKAGES mesa lib32-mesa
+    fi
+    
     if [[ "$INTEL_GPU" == "true" ]]; then
         # Note: installing newer intel-media-driver (iHD) instead of libva-intel-driver (i965)
         # Intel drivers only supports VA-API
