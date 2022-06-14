@@ -24,10 +24,21 @@
     <font place="OSD"><name>Roboto</name><size>10</size></font>
   </theme>
 
+  <!-- edge strength is in pixels -->
+  <resistance>
+    <screenEdgeStrength>20</screenEdgeStrength>
+  </resistance>
+  
   <focus>
     <followMouse>no</followMouse>
     <raiseOnFocus>no</raiseOnFocus>
   </focus>
+
+  <!-- Set range to 0 to disable window snapping completely -->
+  <snapping>
+    <range>1</range>
+    <topMaximize>yes</topMaximize>
+  </snapping>
 
   <!--
     Keybind actions are specified in labwc-actions(5)
@@ -109,10 +120,5 @@
       <action name="Execute"><command>brightnessctl set 10%-</command></action>
     </keybind>
   </keyboard>
-
-  <!-- edge strength is in pixels -->
-  <resistance>
-    <screenEdgeStrength>20</screenEdgeStrength>
-  </resistance>
 
 </labwc_config>

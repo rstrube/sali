@@ -118,6 +118,7 @@ function install() {
         networkmanager          `# Networkmanager` \
         git                     `# Git` \
         vim                     `# Text editor` \
+        cpupower                `# Tool for managing your CPU frequency and governor` \
         reflector               `# Utility to manage pacman mirrors`
 
     # Install additional firmware and uCode
@@ -268,11 +269,13 @@ function install() {
         # Note: installing newer intel-media-driver (iHD) instead of libva-intel-driver (i965)
         # Intel drivers only supports VA-API
         arch-chroot /mnt pacman -S --noconfirm --needed $COMMON_VULKAN_PACKAGES mesa lib32-mesa vulkan-intel lib32-vulkan-intel intel-media-driver libva-utils
+        arch-chroot /mnt echo "LIBVA_DRIVER_NAME=iHD" >> /etc/environment
     fi
 
     if [[ "$AMD_GPU" == "true" ]]; then
         # AMDGPU supports both VA-API and VDPAU, but we're only installing support for VA-API
         arch-chroot /mnt pacman -S --noconfirm --needed $COMMON_VULKAN_PACKAGES mesa lib32-mesa vulkan-radeon lib32-vulkan-radeon libva-mesa-driver lib32-libva-mesa-driver libva-utils
+        arch-chroot /mnt echo "LIBVA_DRIVER_NAME=radeonsi" >> /etc/environment
     fi
     
     if [[ "$NVIDIA_GPU" == "true" ]]; then
@@ -291,7 +294,7 @@ function install() {
     # Install additional GTK theme and fonts to make everything look consistent
     arch-chroot /mnt pacman -S --noconfirm --needed pop-gtk-theme ttf-roboto ttf-roboto-mono
 
-    # Clone sagi git repo so that user can run post-install recipe
+    # Clone sali git repo so that user can run post-install recipe
     arch-chroot -u $USER_NAME /mnt git clone https://github.com/rstrube/sali.git /home/${USER_NAME}/sali
 
     # Copy default configuration files for labwc
