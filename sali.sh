@@ -100,11 +100,11 @@ function install() {
     chmod 600 /mnt"$SWAPFILE"
     mkswap /mnt"$SWAPFILE"
 
+    # Force a refresh of the archlinux-keyring package for the arch installation environment
+    pacman -Sy --noconfirm archlinux-keyring
+
     # Bootstrap new environment
     pacstrap /mnt
-
-    # Force a refresh of the archlinux-keyring package
-    arch-chroot /mnt pacman -Syyu --noconfirm archlinux-keyring
 
     # Install essential packages
     arch-chroot /mnt pacman -S --noconfirm --needed \
@@ -215,6 +215,7 @@ function install() {
     
     # Install all prereqs for labwc
     arch-chroot /mnt pacman -S --noconfirm --needed \
+        xdg-user-dirs               `# Standard directories under home (e.g. Documents, Pictures, etc.)` \
         wlroots                     `# wlroots` \
         xorg-xwayland               `# Xwayland support` \
         pipewire wireplumber        `# Pipewire and wireplumber session manager` \
@@ -242,10 +243,12 @@ function install() {
         papirus-icon-theme          `# Icon theme` \
         rust                        `# Rust for paru AUR helper` 
 
-    #Note: systemctl enable --user doesn't work via arch-chroot, performing manual creation of symlinks
+    # Generate standard XDG user directories
+    arch-chroot -u $USER_NAME /mnt xdg-user-dirs-update
+
+    # Note: systemctl enable --user doesn't work via arch-chroot, performing manual creation of symlinks
     # systemctl enable --user --now pipewire.service
     # systemctl enable --user --now pipewire-pulse.service
-    # systemctl enable --user --now pipewire-media-session.service
     arch-chroot -u $USER_NAME /mnt mkdir -p /home/${USER_NAME}/.config/systemd/user/default.target.wants
     arch-chroot -u $USER_NAME /mnt mkdir -p /home/${USER_NAME}/.config/systemd/user/sockets.target.wants
 
@@ -255,7 +258,11 @@ function install() {
     arch-chroot -u $USER_NAME /mnt ln -s /usr/lib/systemd/user/pipewire-pulse.service /home/${USER_NAME}/.config/systemd/user/default.target.wants/pipewire-pulse.service
     arch-chroot -u $USER_NAME /mnt ln -s /usr/lib/systemd/user/pipewire-pulse.socket /home/${USER_NAME}/.config/systemd/user/sockets.target.wants/pipewire-pulse.socket
 
-    arch-chroot -u $USER_NAME /mnt ln -s /usr/lib/systemd/user/pipewire-media-session.service /home/${USER_NAME}/.config/systemd/user/default.target.wants/pipewire-media-session.service
+    # systemctl enable --user --now wireplumber.service
+    arch-chroot -u $USER_NAME /mnt mkdir -p /home/${USER_NAME}/.config/systemd/user/pipewire.service.wants
+
+    arch-chroot -u $USER_NAME /mnt ln -s /usr/lib/systemd/user/wireplumber.service /home/${USER_NAME}/.config/systemd/user/pipewire-session-manager.service
+    arch-chroot -u $USER_NAME /mnt ln -s /usr/lib/systemd/user/wireplumber.service /home/${USER_NAME}/.config/systemd/user/pipewire.service.wants/wireplumber.service
 
     # Install GPU Drivers
     COMMON_VULKAN_PACKAGES="vulkan-icd-loader lib32-vulkan-icd-loader vulkan-tools"
