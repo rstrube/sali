@@ -520,7 +520,7 @@ Target=pacman-mirrorlist
 Description=Updating pacman-mirrorlist with reflector and removing pacnew...
 When=PostTransaction
 Depends=reflector
-Exec=/bin/sh -c 'systemctl start reflector.service; [ -f /etc/pacman.d/mirrorlist.pacnew ] && rm /etc/pacman.d/mirrorlist.pacnew'
+Exec=/bin/sh -c 'systemctl start reflector.service && rm -f /etc/pacman.d/mirrorlist.pacnew'
 EOT
 
 }
