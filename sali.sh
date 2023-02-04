@@ -29,11 +29,18 @@ PING_HOSTNAME="www.google.com"
 HOSTNAME="sali"
 
 # Locale Configuration
-# To list out all timezones in US run "ls -l /usr/share/zoneinfo/America"
+# To list out all timezones in a given region run "ls -l /usr/share/zoneinfo/{region}" e.g. "ls -l /usr/share/zoneinfo/America"
+# To list out all timezones run "timedatectl list-timezones"
+# To examine available locales look in /etc/locale.gen, first column is used for LANG, both columns together are used for LOCALE
 KEYS="us"
 TIMEZONE="/usr/share/zoneinfo/America/Denver"
 LOCALE="en_US.UTF-8 UTF-8"
 LANG="en_US.UTF-8"
+
+# TTY Font (Default: Terminus 24px bold)
+TTY_FONT="ter-124b" #ter-124n #ter-128b #ter-128n #ter-132b #ter-132n
+
+# Reflector Configuration
 REFLECTOR_COUNTRY="United States"
 
 # User Configuration
@@ -43,6 +50,9 @@ USER_PASSWORD=""
 
 # Additional Linux Command Line Params
 CMDLINE_LINUX="" #"msr.allow_writes=on"
+
+# Uncomment to enable the installation log
+#LOG_FILE="sali.log"
 
 # Installation Scripts
 #################################################
@@ -60,22 +70,37 @@ function main() {
 }
 
 function install() {
+
+    local PACMAN_ARGS=""
+
+    if [ -n "$LOG_FILE" ]; then
+        exec > >(tee ./${LOG_FILE}) 2>&1
+        echo "Installation logging enabled to: ${LOG_FILE}"
+        PACMAN_ARGS="--noprogressbar"
+    fi
+
+    echo "=========================================="
+    echo "1. System clock and initial reflector pass"
+    echo "=========================================="
     # Update system clock
     timedatectl set-ntp true
 
-    # Update pacman mirrors
-    reflector --verbose --country "$REFLECTOR_COUNTRY" --latest 10 --sort rate --save /etc/pacman.d/mirrorlist
+    # Select the fastest pacman mirrors
+    reflector --verbose --country "$REFLECTOR_COUNTRY" --latest 25 --sort rate --save /etc/pacman.d/mirrorlist
 
+    echo "================================="
+    echo "2. HD partitioning and formatting"
+    echo "================================="
     # Partion the drive with a single 512 MB ESP partition, and the rest of the drive as the root partition
     parted -s $HD_DEVICE mklabel gpt mkpart ESP fat32 1MiB 512MiB mkpart root ext4 512MiB 100% set 1 esp on
 
     # Is the the hard drive an NVME SSD?
     if [[ -n "$(echo $HD_DEVICE | grep "^/dev/nvme")" ]]; then
-        BOOT_PARTITION="${HD_DEVICE}p1"
-        ROOTFS_PARTITION="${HD_DEVICE}p2"
+        local BOOT_PARTITION="${HD_DEVICE}p1"
+        local ROOTFS_PARTITION="${HD_DEVICE}p2"
     else
-        BOOT_PARTITION="${HD_DEVICE}1"
-        ROOTFS_PARTITION="${HD_DEVICE}2"
+        local BOOT_PARTITION="${HD_DEVICE}1"
+        local ROOTFS_PARTITION="${HD_DEVICE}2"
     fi
 
     # Create the filesystem for the ESP partition
@@ -94,22 +119,26 @@ function install() {
     mount -o defaults,noatime $BOOT_PARTITION /mnt/boot
 
     # Build out swapfile
-    SWAPFILE="/swapfile"
+    local SWAPFILE="/swapfile"
     fallocate --length ${SWAPFILE_SIZE}MiB /mnt"$SWAPFILE"
     chown root /mnt"$SWAPFILE"
     chmod 600 /mnt"$SWAPFILE"
     mkswap /mnt"$SWAPFILE"
 
+    echo "====================================="
+    echo "3. Initial pacstrap and core packages"
+    echo "====================================="
     # Force a refresh of the archlinux-keyring package for the arch installation environment
-    pacman -Sy --noconfirm archlinux-keyring
+    pacman -Sy --noconfirm $PACMAN_ARGS archlinux-keyring
 
-    # Bootstrap new environment
+    # Bootstrap new environment (base)
     pacstrap /mnt
 
     # Install essential packages
-    arch-chroot /mnt pacman -S --noconfirm --needed \
+    arch-chroot /mnt pacman -S --noconfirm --needed $PACMAN_ARGS \
         base-devel              `# Core development libraries (gcc, etc.)` \
         linux linux-headers     `# Linux kernel and headers` \
+        linux-firmware          `# Linux firmawre` \
         fwupd                   `# Support for updating firmware from Linux Vendor Firmware Service [https://fwupd.org/]` \
         man-db man-pages        `# man pages` \
         texinfo                 `# GUN documentation format` \
@@ -119,16 +148,22 @@ function install() {
         git                     `# Git` \
         vim                     `# Text editor` \
         cpupower                `# Tool for managing your CPU frequency and governor` \
-        reflector               `# Utility to manage pacman mirrors`
+        reflector               `# Utility to manage pacman mirrors` \
+        terminus-font           `# Terminus font for tty`
 
     # Install additional firmware and uCode
     if [[ "$AMD_CPU" == "true" ]]; then
-        arch-chroot /mnt pacman -S --noconfirm --needed linux-firmware amd-ucode
+        arch-chroot /mnt pacman -S --noconfirm --needed $PACMAN_ARGS linux-firmware amd-ucode
+        local MICROCODE="amd-ucode.img"
 
     elif [[ "$INTEL_CPU" == "true" ]]; then
-        arch-chroot /mnt pacman -S --noconfirm --needed linux-firmware intel-ucode
+        arch-chroot /mnt pacman -S --noconfirm --needed $PACMAN_ARGS linux-firmware intel-ucode
+        local MICROCODE="intel-ucode.img"
     fi
 
+    echo "============================"
+    echo "4. Core system configuration"
+    echo "============================"
     # Enable systemd-resolved local caching DNS provider
     # Note: NetworkManager uses systemd-resolved by default
     arch-chroot /mnt systemctl enable systemd-resolved.service
@@ -142,11 +177,10 @@ function install() {
 
     # Configure color support for pacman
     arch-chroot /mnt sed -i 's/#Color/Color/' /etc/pacman.conf
-    arch-chroot /mnt sed -i 's/#TotalDownload/TotalDownload/' /etc/pacman.conf
 
     # Enable multilib
     arch-chroot /mnt sed -i "/\[multilib\]/,/Include/"'s/^#//' /etc/pacman.conf
-    arch-chroot /mnt pacman -Syyu
+    arch-chroot /mnt pacman -Syyu $PACMAN_ARGS
 
     # Generate initial fstab using UUIDs
     genfstab -U /mnt > /mnt/etc/fstab
@@ -173,6 +207,10 @@ function install() {
     arch-chroot /mnt locale-gen
     echo -e "LANG=$LANG" >> /mnt/etc/locale.conf
 
+    # Configure keymap and font for virtual console (tty)
+    echo -e "KEYMAP=$KEYS" > /mnt/etc/vconsole.conf
+    echo -e "FONT=$TTY_FONT" >> /mnt/etc/vconsole.conf 
+
     # Configure hostname and hosts files
     echo $HOSTNAME > /mnt/etc/hostname
     echo "127.0.0.1	localhost" >> /mnt/etc/hosts
@@ -182,37 +220,116 @@ function install() {
     # Configure root password
     printf "$ROOT_PASSWORD\n$ROOT_PASSWORD" | arch-chroot /mnt passwd
 
-    # Install and configure Grub as bootloader on ESP
-    arch-chroot /mnt pacman -S --noconfirm --needed grub efibootmgr
+    # Configure reflector
+    echo "--save /etc/pacman.d/mirrorlist" > /mnt/etc/xdg/reflector/reflector.conf
+    echo "--country \"$REFLECTOR_COUNTRY\"" >> /mnt/etc/xdg/reflector/reflector.conf
+    echo "--protocol https" >> /mnt/etc/xdg/reflector/reflector.conf
+    echo "--latest 15" >> /mnt/etc/xdg/reflector/reflector.conf
+    echo "--sort rate" >> /mnt/etc/xdg/reflector/reflector.conf
 
+    echo "=========================================="
+    echo "5. Bootloader configuration (systemd-boot)"
+    echo "=========================================="
     # Add KMS if using a NVIDIA GPU
     if [[ "$NVIDIA_GPU" == "true" ]]; then
         CMDLINE_LINUX="$CMDLINE_LINUX nvidia-drm.modeset=1"
     fi
 
     CMDLINE_LINUX=$(trim_variable "$CMDLINE_LINUX")
-    arch-chroot /mnt sed -i 's/GRUB_CMDLINE_LINUX=""/GRUB_CMDLINE_LINUX="'"$CMDLINE_LINUX"'"/' /etc/default/grub
 
-    # Note the '--removable' switch will also setup grub on /boot/EFI/BOOT/BOOTX64.EFI (which is the Windows default location)
-    # This is neccessary because many BIOSes don't honor efivars correctly
-    arch-chroot /mnt grub-install --target=x86_64-efi --bootloader-id=grub --efi-directory=/boot --recheck --removable
-    arch-chroot /mnt grub-mkconfig -o /boot/grub/grub.cfg
+    # Standard hooks for /etc/mkinitcpio.conf with systemd boot support
+    local MKINITCPIO_HOOKS="base systemd autodetect keyboard sd-vconsole modconf block fsck filesystems"
 
+    # Modules for /etc/mkinitcpio.conf based on GPU
+    if [[ "$INTEL_GPU" == "true" ]]; then
+        local MKINITCPIO_MODULES="i915"
+    fi
+
+    if [[ "$AMD_GPU" == "true" ]]; then
+        local MKINITCPIO_MODULES="amdgpu"
+    fi
+    
+    if [[ "$NVIDIA_GPU" == "true" ]]; then
+        local MKINITCPIO_MODULES="nvidia nvidia_modeset nvidia_uvm nvidia_drm"
+    fi
+
+    # Update /etc/mkinitcpio.conf with hooks and modules
+    arch-chroot /mnt sed -i "s/^HOOKS=(.*)$/HOOKS=($MKINITCPIO_HOOKS)/" /etc/mkinitcpio.conf
+    arch-chroot /mnt sed -i "s/^MODULES=(.*)$/MODULES=($MKINITCPIO_MODULES)/" /etc/mkinitcpio.conf
+
+    # Need to rebuild the initramfs after updating hooks and modules
+    arch-chroot /mnt mkinitcpio -P
+
+    # Note: removing grub support for now, standardizing on systemd-boot
+    #if [[ "$BOOTLOADER" == "grub" ]]; then
+
+        # Install and configure Grub as bootloader on ESP
+        #arch-chroot /mnt pacman -S --noconfirm --needed grub efibootmgr
+
+        #arch-chroot /mnt sed -i 's/GRUB_CMDLINE_LINUX=""/GRUB_CMDLINE_LINUX="'"$CMDLINE_LINUX"'"/' /etc/default/grub
+
+        # Note: the '--removable' switch will also setup grub on /boot/EFI/BOOT/BOOTX64.EFI (which is the Windows default location)
+        # This is neccessary because many BIOSes don't honor efivars correctly
+        #arch-chroot /mnt grub-install --target=x86_64-efi --bootloader-id=grub --efi-directory=/boot --recheck --removable
+        #arch-chroot /mnt grub-mkconfig -o /boot/grub/grub.cfg
+
+    #elif [[ "$BOOTLOADER" == "systemd" ]]; then
+        
+        # Get the UUID for the root partition
+        local UUID_ROOTFS_PARTITION=$(blkid -s UUID -o value "$ROOTFS_PARTITION")
+        local CMDLINE_LINUX_ROOT="root=UUID=$UUID_ROOTFS_PARTITION"
+
+        arch-chroot /mnt systemd-machine-id-setup
+        arch-chroot /mnt bootctl install
+
+        arch-chroot /mnt mkdir -p /boot/loader
+        arch-chroot /mnt mkdir -p /boot/loader/entries
+
+        # Main systemd-boot config
+        echo "timeout 5" >> "/mnt/boot/loader/loader.conf"
+        echo "default archlinux.conf" >> "/mnt/boot/loader/loader.conf"
+        echo "editor 1" >> "/mnt/boot/loader/loader.conf"
+
+        # Config for normal boot
+        echo "title Arch Linux" >> "/mnt/boot/loader/entries/archlinux.conf"
+        echo "efi /vmlinuz-linux" >> "/mnt/boot/loader/entries/archlinux.conf"
+        if [ -n "$MICROCODE" ]; then
+            echo "initrd /$MICROCODE" >> "/mnt/boot/loader/entries/archlinux.conf"
+        fi
+        echo "initrd /initramfs-linux.img" >> "/mnt/boot/loader/entries/archlinux.conf"
+        echo "options initrd=initramfs-linux.img $CMDLINE_LINUX_ROOT rw $CMDLINE_LINUX" >> "/mnt/boot/loader/entries/archlinux.conf"
+
+        # Config for booting into terminal only
+        echo "title Arch Linux (terminal)" >> "/mnt/boot/loader/entries/archlinux-terminal.conf"
+        echo "efi /vmlinuz-linux" >> "/mnt/boot/loader/entries/archlinux-terminal.conf"
+        if [ -n "$MICROCODE" ]; then
+            echo "initrd /$MICROCODE" >> "/mnt/boot/loader/entries/archlinux-terminal.conf"
+        fi
+        echo "initrd /initramfs-linux.img" >> "/mnt/boot/loader/entries/archlinux-terminal.conf"
+        echo "options initrd=initramfs-linux.img $CMDLINE_LINUX_ROOT rw $CMDLINE_LINUX systemd.unit=multi-user.target" >> "/mnt/boot/loader/entries/archlinux-terminal.conf"
+
+        # Config for fallback boot (uses old initramfs)
+        echo "title Arch Linux (fallback)" >> "/mnt/boot/loader/entries/archlinux-fallback.conf"
+        echo "efi /vmlinuz-linux" >> "/mnt/boot/loader/entries/archlinux-fallback.conf"
+        if [ -n "$MICROCODE" ]; then
+            echo "initrd /$MICROCODE" >> "/mnt/boot/loader/entries/archlinux-fallback.conf"
+        fi
+        echo "initrd /initramfs-linux-fallback.img" >> "/mnt/boot/loader/entries/archlinux-fallback.conf"
+        echo "options initrd=initramfs-linux-fallback.img $CMDLINE_LINUX_ROOT rw $CMDLINE_LINUX" >> "/mnt/boot/loader/entries/archlinux-fallback.conf"
+
+    #fi
+
+    echo "======================"
+    echo "6. User configuration"
+    echo "======================"
     # Setup user and allow user to use "sudo"
     arch-chroot /mnt useradd -m -G wheel,storage,optical -s /bin/bash $USER_NAME
     printf "$USER_PASSWORD\n$USER_PASSWORD" | arch-chroot /mnt passwd $USER_NAME
     arch-chroot /mnt sed -i 's/# %wheel ALL=(ALL:ALL) ALL/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 
-    # Configure reflector
-    echo "--save /etc/pacman.d/mirrorlist" > /mnt/etc/xdg/reflector/reflector.conf
-    echo "--country \"$REFLECTOR_COUNTRY\"" >> /mnt/etc/xdg/reflector/reflector.conf
-    echo "--protocol https" >> /mnt/etc/xdg/reflector/reflector.conf
-    echo "--latest 10" >> /mnt/etc/xdg/reflector/reflector.conf
-    echo "--sort rate" >> /mnt/etc/xdg/reflector/reflector.conf
-
-    # Configure pacman hook for upgrading pacman-mirrorlist package
-    configure_pacman_mirrorupgrade_hook
-    
+    echo "=================================="
+    echo "7. DE & audio system configuration"
+    echo "=================================="
     # Install all prereqs for labwc
     arch-chroot /mnt pacman -S --noconfirm --needed \
         xdg-user-dirs               `# Standard directories under home (e.g. Documents, Pictures, etc.)` \
@@ -229,6 +346,7 @@ function install() {
         swaybg swayidle slurp grim  `# Commandline utils for: setting bg, idle handling, selecting display, and screenshots` \
         mako                        `# Notification daemon` \
         qt5-wayland                 `# Explicit support for running Qt apps under wayland` \
+        kitty                       `# Kitty terminal` \
         firefox                     `# Browser ` \
         thunar                      `# Thunar file manager` \
         gvfs                        `# Gnome Virtual Filesystem for additional mount support (smb,mtp, etc.)` \
@@ -239,8 +357,13 @@ function install() {
         ttf-liberation              `# Liberation fonts` \
         noto-fonts noto-fonts-emoji `# Noto fonts to support emojis` \
         otf-font-awesome            `# Font Awesome fonts for waybar` \
-        pop-gtk-theme               `# GTK theme` \
-        papirus-icon-theme          `# Icon theme` \
+        gst-plugin-pipewire         `# Additional GStreamer plugins` \
+        gst-libav \
+        gst-plugins-base \
+        gst-plugins-good \
+        gst-plugins-bad \
+        gst-plugins-ugly \
+        gstreamer-vaapi \
         rust                        `# Rust for paru AUR helper` 
 
     # Generate standard XDG user directories
@@ -264,43 +387,53 @@ function install() {
     arch-chroot -u $USER_NAME /mnt ln -s /usr/lib/systemd/user/wireplumber.service /home/${USER_NAME}/.config/systemd/user/pipewire-session-manager.service
     arch-chroot -u $USER_NAME /mnt ln -s /usr/lib/systemd/user/wireplumber.service /home/${USER_NAME}/.config/systemd/user/pipewire.service.wants/wireplumber.service
 
+
+    echo "===================="
+    echo "8. GPU Configuration"
+    echo "===================="
     # Install GPU Drivers
     COMMON_VULKAN_PACKAGES="vulkan-icd-loader lib32-vulkan-icd-loader vulkan-tools"
 
     # Drivers for VM guest installations
     if [[ "$INTEL_GPU" == "false" && "$AMD_GPU" == "false" && "$NVIDIA_GPU" == "false" ]]; then
-        arch-chroot /mnt pacman -S --noconfirm --needed $COMMON_VULKAN_PACKAGES mesa lib32-mesa
+        arch-chroot /mnt pacman -S --noconfirm --needed $PACMAN_ARGS $COMMON_VULKAN_PACKAGES mesa lib32-mesa
     fi
     
     if [[ "$INTEL_GPU" == "true" ]]; then
         # Note: installing newer intel-media-driver (iHD) instead of libva-intel-driver (i965)
         # Intel drivers only supports VA-API
-        arch-chroot /mnt pacman -S --noconfirm --needed $COMMON_VULKAN_PACKAGES mesa lib32-mesa vulkan-intel lib32-vulkan-intel intel-media-driver libva-utils
+        arch-chroot /mnt pacman -S --noconfirm --needed $PACMAN_ARGS $COMMON_VULKAN_PACKAGES mesa lib32-mesa vulkan-intel lib32-vulkan-intel intel-media-driver libva-utils
         arch-chroot /mnt echo "LIBVA_DRIVER_NAME=iHD" >> /etc/environment
     fi
 
     if [[ "$AMD_GPU" == "true" ]]; then
         # AMDGPU supports both VA-API and VDPAU, but we're only installing support for VA-API
-        arch-chroot /mnt pacman -S --noconfirm --needed $COMMON_VULKAN_PACKAGES mesa lib32-mesa vulkan-radeon lib32-vulkan-radeon libva-mesa-driver lib32-libva-mesa-driver libva-utils
+        arch-chroot /mnt pacman -S --noconfirm --needed $PACMAN_ARGS $COMMON_VULKAN_PACKAGES mesa lib32-mesa vulkan-radeon lib32-vulkan-radeon libva-mesa-driver lib32-libva-mesa-driver libva-utils
         arch-chroot /mnt echo "LIBVA_DRIVER_NAME=radeonsi" >> /etc/environment
     fi
     
     if [[ "$NVIDIA_GPU" == "true" ]]; then
-        arch-chroot /mnt pacman -S --noconfirm --needed $COMMON_VULKAN_PACKAGES nvidia-dkms nvidia-utils lib32-nvidia-utils nvidia-settings
+        arch-chroot /mnt pacman -S --noconfirm --needed $PACMAN_ARGS $COMMON_VULKAN_PACKAGES nvidia-dkms nvidia-utils lib32-nvidia-utils nvidia-settings
 
         # Configure pacman to rebuild the initramfs each time the nvidia package is updated
         configure_pacman_nvidia_hook
     fi
 
+    echo "===================="
+    echo "9. AUR configuration"
+    echo "===================="
     # Install AUR helper
     install_aur_helper
 
+    # Install AUR packages
+    # exec_as_user "paru -S --noconfirm --needed xxx"
+
     # Install labwc and other important utilities via AUR
-    exec_as_user "paru -S --noconfirm --needed labwc foot fuzzel wlr-randr way-displays waybar network-manager-applet"
+    exec_as_user "paru -S --noconfirm --needed labwc tofi wlr-randr way-displays waybar network-manager-applet"
 
-    # Install additional GTK theme and fonts to make everything look consistent
-    arch-chroot /mnt pacman -S --noconfirm --needed pop-gtk-theme ttf-roboto ttf-roboto-mono
-
+    # Install additional fonts to make everything look consistent
+    arch-chroot /mnt pacman -S --noconfirm --needed ttf-roboto ttf-roboto-mono
+    
     # Clone sali git repo so that user can run post-install recipe
     arch-chroot -u $USER_NAME /mnt git clone https://github.com/rstrube/sali.git /home/${USER_NAME}/sali
 
@@ -311,10 +444,6 @@ function install() {
     arch-chroot -u $USER_NAME /mnt cp /home/${USER_NAME}/sali/config/labwc/autostart /home/${USER_NAME}/.config/labwc/.
     arch-chroot -u $USER_NAME /mnt cp /home/${USER_NAME}/sali/config/labwc/environment /home/${USER_NAME}/.config/labwc/.
 
-    # Copy sali theme for labwc
-    arch-chroot -u $USER_NAME /mnt mkdir -p /home/${USER_NAME}/.local/share/themes
-    arch-chroot -u $USER_NAME /mnt cp -r /home/${USER_NAME}/sali/themes/sali /home/${USER_NAME}/.local/share/themes/.
-
     # Copy default configuration file for way-displays
     arch-chroot -u $USER_NAME /mnt mkdir -p /home/${USER_NAME}/.config/way-displays
     arch-chroot -u $USER_NAME /mnt cp /home/${USER_NAME}/sali/config/way-displays/cfg.yaml /home/${USER_NAME}/.config/way-displays/.
@@ -324,12 +453,26 @@ function install() {
     arch-chroot -u $USER_NAME /mnt cp /home/${USER_NAME}/sali/config/waybar/config /home/${USER_NAME}/.config/waybar/.
     arch-chroot -u $USER_NAME /mnt cp /home/${USER_NAME}/sali/config/waybar/style.css /home/${USER_NAME}/.config/waybar/.
 
-    # Copy default configuration file and styling for foot
-    arch-chroot -u $USER_NAME /mnt mkdir -p /home/${USER_NAME}/.config/foot
-    arch-chroot -u $USER_NAME /mnt cp /home/${USER_NAME}/sali/config/foot/foot.ini /home/${USER_NAME}/.config/foot/.
+    echo "==========================="
+    echo "10. Additional pacman hooks"
+    echo "==========================="
+    # Configure pacman hook for upgrading pacman-mirrorlist package
+    configure_pacman_mirrorupgrade_hook
 
-    
-    echo -e "${LIGHT_BLUE}Installation has completed! Run 'reboot' to reboot your machine.${NC}"
+    # Configure pacman hook for updating systemd-boot when systemd is updated
+    configure_pacman_systemd_boot_hook
+
+    echo "========================================="
+    echo "11. Clone repo for additional ingredients"
+    echo "========================================="
+    # Clone sagi git repo so that user can run post-install recipe
+    arch-chroot -u $USER_NAME /mnt git clone https://github.com/rstrube/sali.git /home/${USER_NAME}/sali
+
+    if [ -n "$LOG_FILE" ]; then
+        cp ./${LOG_FILE} /mnt/home/${USER_NAME}/
+    fi
+
+    echo -e "${LBLUE}Installation has completed! Run 'reboot' to reboot your machine.${NC}"
 }
 
 function check_critical_prereqs() {
@@ -421,7 +564,7 @@ function print_variables_boolean() {
 
 function check_conflicts() {
     if [[ "$AMD_CPU" == "true" && "$INTEL_CPU" == "true" ]]; then
-        echo -e "${RED}Error: AMD_CPU and INTEL_CPU are mutually exclusve and can't both =true.${NC}"
+        echo -e "${RED}Error: AMD_CPU and INTEL_CPU are mutually exclusve and can't both be set to 'true'.${NC}"
         exit 1
     fi
 }
@@ -491,6 +634,7 @@ function confirm_install() {
             exit
             ;;
     esac
+    echo ""
 }
 
 function install_aur_helper() {
@@ -505,9 +649,28 @@ function exec_as_user() {
     arch-chroot /mnt sed -i 's/^%wheel ALL=(ALL:ALL) NOPASSWD: ALL$/%wheel ALL=(ALL:ALL) ALL/' /etc/sudoers
 }
 
+function configure_pacman_systemd_boot_hook() {	
+    if [[ ! -d "/mnt/etc/pacman.d/hooks" ]]; then	
+        arch-chroot /mnt mkdir -p /etc/pacman.d/hooks	
+    fi	
+
+    cat <<EOT > "/mnt/etc/pacman.d/hooks/sytemd-boot.hook"
+[Trigger]
+Type=Package
+Operation=Upgrade
+Target=systemd
+
+[Action]
+Description=Gracefully upgrading systemd-boot...
+When=PostTransaction
+Exec=/usr/bin/systemctl restart systemd-boot-update.service
+EOT
+
+}
+
 function configure_pacman_mirrorupgrade_hook() {	
     if [[ ! -d "/mnt/etc/pacman.d/hooks" ]]; then	
-        mkdir -p /mnt/etc/pacman.d/hooks	
+        arch-chroot /mnt mkdir -p /etc/pacman.d/hooks	
     fi	
 
     cat <<EOT > "/mnt/etc/pacman.d/hooks/mirrorupgrade.hook"	
@@ -527,7 +690,7 @@ EOT
 
 function configure_pacman_nvidia_hook() {
     if [[ ! -d "/mnt/etc/pacman.d/hooks" ]]; then
-        mkdir -p /mnt/etc/pacman.d/hooks
+        arch-chroot /mnt mkdir -p /etc/pacman.d/hooks
     fi
 
     cat <<EOT > "/mnt/etc/pacman.d/hooks/nvidia.hook"
@@ -537,12 +700,15 @@ Operation=Upgrade
 Operation=Remove
 Type=Package
 Target=nvidia
+Target=linux
+# Change the linux part above and in the Exec line if a different kernel is used
 
 [Action]
-Description=Update Nvidia module in initcpio
+Description=Update NVIDIA module in initcpio
 Depends=mkinitcpio
 When=PostTransaction
-Exec=/usr/bin/mkinitcpio -P
+NeedsTargets
+Exec=/bin/sh -c 'while read -r trg; do case $trg in linux) exit 0; esac; done; /usr/bin/mkinitcpio -P'
 EOT
 
 }

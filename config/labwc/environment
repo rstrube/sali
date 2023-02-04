@@ -2,8 +2,7 @@
 # Configured for sali
 
 # Set core env vars
-XDG_CURRENT_DESKTOP=sway
-XDG_SESSION_DESKTOP=sway
+XDG_CURRENT_DESKTOP=wlroots
 SDL_VIDEODRIVER=wayland
 _JAVA_AWT_WM_NONREPARENTING=1
 QT_QPA_PLATFORM=wayland
@@ -12,9 +11,13 @@ QT_QPA_PLATFORM=wayland
 MOZ_ENABLE_WAYLAND=1
 
 # Set global GTK theme
-GTK_THEME=Pop-dark
+#GTK_THEME=Adwaita-dark
 
 # Set cursor theme.
 # Find icons themes with the command below or similar:
 #     find /usr/share/icons/ -type d -name "cursors"
 # XCURSOR_THEME=breeze_cursors
+
+# Disable hardware cursors. Most users wouldn't want to do this, but if you
+# are experiencing issues with disappearing cursors, this might fix it.
+#WLR_NO_HARDWARE_CURSORS=1

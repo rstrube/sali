@@ -24,15 +24,12 @@ mako >/dev/null 2>&1 &
 # Start polkit-gnome to prompt for elevated credentials when neccessary
 /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 >/dev/null 2>&1 &
 
-# Import user env vars into systemd user session to support xdg-desktop-portal-wlr
-dbus-update-activation-environment --systemd DISPLAY WAYLAND_DISPLAY XDG_CURRENT_DESKTOP=sway >/dev/null 2>&1 &
-
 # Start NetworkManager applet (shown in systray)
 nm-applet --indicator >/dev/null 2>&1 &
 
 # Set GTK themes and fonts
-gsettings set org.gnome.desktop.interface gtk-theme "Pop-dark" >/dev/null 2>&1 &
-gsettings set org.gnome.desktop.interface icon-theme "Papirus-Dark" >/dev/null 2>&1 &
+#gsettings set org.gnome.desktop.interface gtk-theme "Adwaita-dark" >/dev/null 2>&1 &
+#gsettings set org.gnome.desktop.interface icon-theme "Papirus-Dark" >/dev/null 2>&1 &
 gsettings set org.gnome.desktop.interface font-name "Roboto 10" >/dev/null 2>&1 &
 gsettings set org.gnome.desktop.interface document-font-name "Roboto 10" >/dev/null 2>&1 &
 gsettings set org.gnome.desktop.interface monospace-font-name "Roboto Mono 11" >/dev/null 2>&1 &
