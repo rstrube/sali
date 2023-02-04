@@ -434,7 +434,19 @@ function install() {
     # Install additional fonts to make everything look consistent
     arch-chroot /mnt pacman -S --noconfirm --needed ttf-roboto ttf-roboto-mono
     
-    # Clone sali git repo so that user can run post-install recipe
+    echo "==========================="
+    echo "10. Additional pacman hooks"
+    echo "==========================="
+    # Configure pacman hook for upgrading pacman-mirrorlist package
+    configure_pacman_mirrorupgrade_hook
+
+    # Configure pacman hook for updating systemd-boot when systemd is updated
+    configure_pacman_systemd_boot_hook
+
+    echo "========================================="
+    echo "11. Clone repo for additional ingredients"
+    echo "========================================="
+    # Clone sagi git repo so that user can run post-install recipe
     arch-chroot -u $USER_NAME /mnt git clone https://github.com/rstrube/sali.git /home/${USER_NAME}/sali
 
     # Copy default configuration files for labwc
@@ -452,21 +464,6 @@ function install() {
     arch-chroot -u $USER_NAME /mnt mkdir -p /home/${USER_NAME}/.config/waybar
     arch-chroot -u $USER_NAME /mnt cp /home/${USER_NAME}/sali/config/waybar/config /home/${USER_NAME}/.config/waybar/.
     arch-chroot -u $USER_NAME /mnt cp /home/${USER_NAME}/sali/config/waybar/style.css /home/${USER_NAME}/.config/waybar/.
-
-    echo "==========================="
-    echo "10. Additional pacman hooks"
-    echo "==========================="
-    # Configure pacman hook for upgrading pacman-mirrorlist package
-    configure_pacman_mirrorupgrade_hook
-
-    # Configure pacman hook for updating systemd-boot when systemd is updated
-    configure_pacman_systemd_boot_hook
-
-    echo "========================================="
-    echo "11. Clone repo for additional ingredients"
-    echo "========================================="
-    # Clone sagi git repo so that user can run post-install recipe
-    arch-chroot -u $USER_NAME /mnt git clone https://github.com/rstrube/sali.git /home/${USER_NAME}/sali
 
     if [ -n "$LOG_FILE" ]; then
         cp ./${LOG_FILE} /mnt/home/${USER_NAME}/
