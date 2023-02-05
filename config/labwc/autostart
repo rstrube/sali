@@ -1,6 +1,9 @@
 # Labwc autostart file
 # Configured for sali
 
+# Bring environment variables into the systemd user session to support xdg-desktop-portal-wlr
+systemctl --user import-environment WAYLAND_DISPLAY XDG_CURRENT_DESKTOP 2>&1 &
+
 # Set background color.
 swaybg -c '#404040' >/dev/null 2>&1 &
 
